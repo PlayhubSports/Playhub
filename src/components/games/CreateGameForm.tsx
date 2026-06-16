@@ -10,11 +10,13 @@ import {
   type LocalGameInput,
   type LocalGameAdmissionMode,
 } from '@/lib/localGames'
+import { createSupabaseGame } from '@/lib/supabaseGames'
 
 // ── Tipos internos do formulário ──────────────
 type Level = 'iniciante' | 'intermediario' | 'avancado' | 'todos'
 type Privacy = 'publico' | 'privado'
 type StatusTone = 'pending' | 'success' | 'danger' | 'info' | 'neutral'
+type SaveScope = 'shared' | 'local'
 
 type IconName =
   | 'sport'
@@ -1092,6 +1094,8 @@ export function CreateGameForm() {
   const [step, setStep] = useState(0)
   const [form, setForm] = useState<FormData>(() => createInitialForm())
   const [success, setSuccess] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveScope, setSaveScope] = useState<SaveScope>('shared')
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({})
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const topRef = useRef<HTMLDivElement | null>(null)
@@ -1239,7 +1243,9 @@ export function CreateGameForm() {
     setStep(s => Math.max(0, s - 1))
   }
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
+    if (isSaving) return
+
     const durationMinutes = getDurationMinutes(form)
     const creatorId = user?.id ?? 'local-user'
 
@@ -1258,7 +1264,7 @@ export function CreateGameForm() {
       return
     }
 
-    const saved = saveLocalGame({
+    const gameInput = {
       sport: form.sport,
       title: form.title,
       date: form.date,
@@ -1273,20 +1279,48 @@ export function CreateGameForm() {
       durationMinutes,
       pricePerHour: form.pricePerHour,
       admissionMode: form.admissionMode,
-    } satisfies LocalGameInput, creatorId)
+    } satisfies LocalGameInput
 
-    if (!saved) {
-      alert('Não foi possível salvar a reserva/jogo localmente. Tente novamente.')
-      return
+    setIsSaving(true)
+
+    try {
+      if (user?.id) {
+        const remoteResult = await createSupabaseGame(gameInput, user.id)
+
+        if (remoteResult.ok) {
+          setSaveScope('shared')
+          setSuccess(true)
+          return
+        }
+
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[PlayHub] Supabase falhou. Tentando fallback local:', remoteResult.error)
+        }
+      }
+
+      const saved = saveLocalGame(gameInput, creatorId)
+
+      if (!saved) {
+        alert('Não foi possível salvar a reserva/jogo. Tente novamente.')
+        return
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('playhub:local-games-updated'))
+      }
+
+      setSaveScope('local')
+      setSuccess(true)
+    } finally {
+      setIsSaving(false)
     }
-
-    setSuccess(true)
   }
 
   if (success) {
     return (
       <SuccessScreen
         form={form}
+        saveScope={saveScope}
         onBack={() => {
           setSuccess(false)
           router.push('/jogos')
@@ -1391,15 +1425,16 @@ export function CreateGameForm() {
           <button
             type="button"
             onClick={handleCreate}
-            className="w-full rounded-[15px] py-3.5 text-[14px] font-extrabold text-white inline-flex items-center justify-center gap-2"
+            disabled={isSaving}
+            className="w-full rounded-[15px] py-3.5 text-[14px] font-extrabold text-white inline-flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             style={{
               background:'linear-gradient(135deg,#7ED321,#00C9A7,#39ff14)',
               boxShadow:'0 10px 28px rgba(126,211,33,0.28)',
               border:'1px solid rgba(255,255,255,0.16)',
             }}
           >
-            <Icon name="check" size={16} />
-            Solicitar reserva
+            <Icon name={isSaving ? 'hourglass' : 'check'} size={16} />
+            {isSaving ? 'Salvando reserva...' : 'Solicitar reserva'}
           </button>
         )}
       </div>
@@ -1987,7 +2022,7 @@ function StepConfirm({ form }: { form: FormData }) {
 }
 
 // ══ TELA DE SUCESSO ══════════════════════════
-function SuccessScreen({ form, onBack }: { form: FormData; onBack: () => void }) {
+function SuccessScreen({ form, saveScope, onBack }: { form: FormData; saveScope: SaveScope; onBack: () => void }) {
   const sport = SPORTS_LIST.find(s => s.key === form.sport)
   const duration = getDurationMinutes(form)
   const total = reservationTotal(form)
@@ -2007,7 +2042,7 @@ function SuccessScreen({ form, onBack }: { form: FormData; onBack: () => void })
         </div>
 
       <p className="text-[11px] font-extrabold text-ph-green uppercase tracking-widest mb-2">
-        Pedido enviado
+        {saveScope === 'shared' ? 'Pedido enviado' : 'Salvo localmente'}
       </p>
 
       <h2
@@ -2019,7 +2054,7 @@ function SuccessScreen({ form, onBack }: { form: FormData; onBack: () => void })
           backgroundClip:'text',
         }}
       >
-        Reserva solicitada
+        {saveScope === 'shared' ? 'Reserva solicitada' : 'Reserva salva no aparelho'}
       </h2>
 
       <p className="text-[15px] font-semibold mb-1">{form.title}</p>
@@ -2029,7 +2064,16 @@ function SuccessScreen({ form, onBack }: { form: FormData; onBack: () => void })
       </p>
 
       <div className="w-full max-w-xs mb-4">
-        <ReservationStatusCard />
+        {saveScope === 'shared' ? (
+          <ReservationStatusCard />
+        ) : (
+          <StatusCard
+            tone="pending"
+            icon="hourglass"
+            title="Reserva salva localmente"
+            description="O app não conseguiu salvar online neste momento. O jogo ficou salvo neste aparelho como fallback seguro."
+          />
+        )}
       </div>
 
       <div className="w-full max-w-xs mb-4">
