@@ -1,0 +1,123 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS VARS — design tokens PlayHub ── */
+@layer base {
+  :root {
+    --ph-blue:      #1DA1F2;
+    --ph-teal:      #00C9A7;
+    --ph-green:     #7ED321;
+    --ph-gold:      #FFD700;
+    --ph-dark:      #060D14;
+    --ph-dark2:     #0C1A26;
+    --ph-card:      #0F1C2A;
+    --ph-card2:     #132233;
+    --ph-muted:     #5A7A94;
+    --ph-text:      #F0F7FF;
+    --ph-border:    rgba(255, 255, 255, 0.07);
+    --ph-gradient:  linear-gradient(135deg, #1DA1F2, #00C9A7, #7ED321);
+    --ph-gradient-h:linear-gradient(90deg,  #1DA1F2, #00C9A7, #7ED321);
+  }
+
+  html, body {
+    @apply h-full overflow-hidden;
+    background-color: #060D14;
+    color: #F0F7FF;
+    font-family: 'DM Sans', system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+  }
+
+  * { box-sizing: border-box; }
+
+  ::-webkit-scrollbar       { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.07); border-radius: 2px; }
+}
+
+/* ── COMPONENTES REUTILIZÁVEIS ── */
+@layer components {
+
+  /* Botão principal gradiente */
+  .ph-btn {
+    @apply w-full py-4 rounded-ph-lg font-bold text-white text-[15px]
+           border-none cursor-pointer
+           transition-all duration-200
+           hover:-translate-y-0.5
+           active:translate-y-0
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    background: var(--ph-gradient);
+    box-shadow: 0 8px 24px rgba(29,161,242,0.28);
+  }
+  .ph-btn:hover:not(:disabled) {
+    box-shadow: 0 12px 32px rgba(29,161,242,0.38);
+  }
+
+  /* Card padrão */
+  .ph-card {
+    @apply bg-ph-card rounded-ph-lg;
+    border: 1px solid var(--ph-border);
+  }
+
+  /* Input padrão */
+  .ph-input {
+    @apply w-full bg-ph-dark2 rounded-ph
+           px-4 py-3 text-ph-text text-[15px]
+           outline-none transition-all duration-200
+           placeholder:text-ph-muted appearance-none;
+    border: 1px solid var(--ph-border);
+  }
+  .ph-input:focus {
+    border-color: #1DA1F2;
+    box-shadow: 0 0 0 2px rgba(29,161,242,0.12);
+  }
+
+  /* Label padrão */
+  .ph-label {
+    @apply block text-[11px] font-semibold text-ph-muted
+           uppercase tracking-[1.2px] mb-1.5;
+  }
+
+  /* Section title com linha */
+  .ph-section-title {
+    @apply flex items-center gap-2 text-[11px] font-semibold
+           text-ph-muted uppercase tracking-[1.2px] mb-2.5;
+  }
+  .ph-section-title::after {
+    content: '';
+    @apply flex-1 h-px;
+    background: var(--ph-border);
+  }
+
+  /* Filter pill */
+  .ph-filter {
+    @apply flex items-center gap-1.5 px-3.5 py-1.5
+           bg-ph-dark2 rounded-full
+           text-ph-muted text-[13px] font-medium
+           cursor-pointer whitespace-nowrap transition-all duration-200;
+    border: 1.5px solid var(--ph-border);
+  }
+  .ph-filter:hover {
+    border-color: rgba(29,161,242,0.4);
+  }
+  .ph-filter.active {
+    @apply bg-ph-blue/10 text-ph-blue;
+    border-color: #1DA1F2;
+  }
+
+  /* Texto com gradiente */
+  .ph-gradient-text {
+    background: var(--ph-gradient-h);
+    @apply bg-clip-text text-transparent;
+  }
+
+  /* Screen container (viewport completo) */
+  .ph-screen {
+    @apply fixed inset-0 flex flex-col overflow-hidden;
+    height: 100dvh;
+  }
+}
