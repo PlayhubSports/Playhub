@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
-import { Game } from '@/lib/types'
+// PlayHub GameDetailsModal — Supabase action-safe v1
+
+import { useEffect, useState, type ReactNode } from 'react'
+import { type Game } from '@/lib/types'
 import { formatGameDate, formatPrice } from '@/lib/utils/format'
 import {
   approveLocalGameJoinRequest,
@@ -13,12 +15,14 @@ import {
   rejectLocalGameJoinRequest,
 } from '@/lib/localGames'
 
+type GameActionResult = void | Promise<void>
+
 interface Props {
   game:          Game
   currentUserId: string
   onClose:       () => void
-  onJoin:        (game: Game) => void
-  onLeave:       (game: Game) => void
+  onJoin:        (game: Game) => GameActionResult
+  onLeave:       (game: Game) => GameActionResult
 }
 
 type StatusTone = 'pending' | 'success' | 'danger' | 'info' | 'neutral'
@@ -633,6 +637,11 @@ function ActionTile({
 
 export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave }: Props) {
   const [localGame, setLocalGame] = useState<Game>(game)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  useEffect(() => {
+    setLocalGame(game)
+  }, [game])
 
   const currentGame = localGame
   const sportLabel = SPORT_LABEL[currentGame.sport] ?? 'Esporte'
@@ -689,6 +698,38 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('playhub:local-games-updated'))
+    }
+  }
+
+  const handleJoinAction = async () => {
+    if (actionLoading || isFull) return
+
+    setActionLoading(true)
+
+    try {
+      await onJoin(currentGame)
+
+      if (currentGame.id.startsWith('local-')) {
+        refreshCurrentGame()
+      }
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleLeaveAction = async () => {
+    if (actionLoading) return
+
+    setActionLoading(true)
+
+    try {
+      await onLeave(currentGame)
+
+      if (currentGame.id.startsWith('local-')) {
+        refreshCurrentGame()
+      }
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -1007,27 +1048,29 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
           {joined ? (
             <button
               type="button"
-              onClick={() => onLeave(currentGame)}
-              className="w-full py-3 rounded-[14px] text-[13px] font-extrabold text-red-400 bg-transparent"
+              onClick={handleLeaveAction}
+              disabled={actionLoading}
+              className="w-full py-3 rounded-[14px] text-[13px] font-extrabold text-red-400 bg-transparent disabled:opacity-60 disabled:cursor-not-allowed"
               style={{border:'1px solid rgba(239,68,68,0.32)'}}
             >
-              Cancelar participação
+              {actionLoading ? 'Processando...' : 'Cancelar participação'}
             </button>
           ) : hasPendingRequest ? (
             <button
               type="button"
-              onClick={() => onLeave(currentGame)}
-              className="w-full py-3 rounded-[14px] text-[13px] font-extrabold text-red-400 bg-transparent"
+              onClick={handleLeaveAction}
+              disabled={actionLoading}
+              className="w-full py-3 rounded-[14px] text-[13px] font-extrabold text-red-400 bg-transparent disabled:opacity-60 disabled:cursor-not-allowed"
               style={{border:'1px solid rgba(239,68,68,0.32)'}}
             >
-              Cancelar solicitação
+              {actionLoading ? 'Processando...' : 'Cancelar solicitação'}
             </button>
           ) : (
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => onJoin(currentGame)}
-                disabled={isFull}
+                onClick={handleJoinAction}
+                disabled={isFull || actionLoading}
                 className="w-full py-3.5 rounded-[15px] text-[14px] font-extrabold text-white disabled:cursor-not-allowed"
                 style={{
                   background: isFull
@@ -1040,7 +1083,7 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
                   boxShadow: isFull ? 'none' : '0 10px 28px rgba(29,161,242,0.28)',
                 }}
               >
-                {isFull ? 'Jogo lotado' : isManualAdmission ? 'Solicitar entrada' : 'Entrar no jogo'}
+                {actionLoading ? 'Processando...' : isFull ? 'Jogo lotado' : isManualAdmission ? 'Solicitar entrada' : 'Entrar no jogo'}
               </button>
 
               {!isFull && (
