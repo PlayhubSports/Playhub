@@ -18,9 +18,9 @@
     "leaflet": "^1.9.4",
     "lucide-react": "0.378.0",
     "maplibre-gl": "^5.24.0",
-    "next": "^15.5.16",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "next": "^14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tailwind-merge": "2.3.0",
     "zustand": "4.5.2"
   },
