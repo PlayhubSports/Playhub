@@ -1,14 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Game } from '@/lib/types'
+import { type Game } from '@/lib/types'
 import { MOCK_GAMES, MOCK_ARENAS } from '@/lib/hooks/useMockData'
 import {
   loadLocalGames,
   requestJoinLocalGame,
   leaveLocalGame,
 } from '@/lib/localGames'
+import {
+  listSupabaseGames,
+  joinSupabaseGame,
+  leaveSupabaseGame,
+} from '@/lib/supabaseGames'
 import { useAuth } from '@/lib/context/AuthContext'
 import { GameCard } from './GameCard'
 import { JoinGameModal } from './JoinGameModal'
@@ -87,6 +92,16 @@ const MOCK_WITH_ARENAS = MOCK_GAMES.map(g => ({
   ...g,
   arena: MOCK_ARENAS.find(a => a.id === g.arena_id),
 })) as Game[]
+
+function dedupeGames(games: Game[]) {
+  const seen = new Set<string>()
+
+  return games.filter(game => {
+    if (seen.has(game.id)) return false
+    seen.add(game.id)
+    return true
+  })
+}
 
 function Icon({
   name,
@@ -260,6 +275,9 @@ export function GamesList() {
   const [search, setSearch] = useState('')
   const [joiningGame, setJoiningGame] = useState<Game | null>(null)
   const [localGames, setLocalGames] = useState<Game[]>([])
+  const [supabaseGames, setSupabaseGames] = useState<Game[]>([])
+  const [sharedGamesLoading, setSharedGamesLoading] = useState(false)
+  const [sharedGamesError, setSharedGamesError] = useState('')
   const [mockGames, setMockGames] = useState<Game[]>(MOCK_WITH_ARENAS)
 
   const { user } = useAuth()
@@ -269,11 +287,28 @@ export function GamesList() {
     setLocalGames(loadLocalGames())
   }
 
+  const refreshSupabaseGames = useCallback(async () => {
+    setSharedGamesLoading(true)
+    setSharedGamesError('')
+
+    const result = await listSupabaseGames()
+
+    if (result.ok) {
+      setSupabaseGames(result.data)
+    } else {
+      setSharedGamesError(result.error)
+    }
+
+    setSharedGamesLoading(false)
+  }, [])
+
   useEffect(() => {
     refreshLocalGames()
+    void refreshSupabaseGames()
 
     const handleLocalGamesUpdated = () => {
       refreshLocalGames()
+      void refreshSupabaseGames()
     }
 
     const handleStorageUpdate = (event: StorageEvent) => {
@@ -300,13 +335,32 @@ export function GamesList() {
     }
   }
 
-  const handleJoinConfirm = (game: Game) => {
+  const isMockGame = (gameId: string) => {
+    return mockGames.some(game => game.id === gameId)
+  }
+
+  const handleJoinConfirm = async (game: Game) => {
     const isLocal = game.id.startsWith('local-')
+    const isMock = isMockGame(game.id)
 
     if (isLocal) {
       requestJoinLocalGame(game.id, userId)
       refreshLocalGames()
       notifyLocalGamesUpdated()
+      setJoiningGame(null)
+      return
+    }
+
+    if (!isMock) {
+      const result = await joinSupabaseGame(game.id, userId)
+
+      if (!result.ok) {
+        alert(result.error || 'Não foi possível entrar neste jogo.')
+        setJoiningGame(null)
+        return
+      }
+
+      await refreshSupabaseGames()
       setJoiningGame(null)
       return
     }
@@ -327,8 +381,9 @@ export function GamesList() {
     setJoiningGame(null)
   }
 
-  const handleLeaveConfirm = (game: Game) => {
+  const handleLeaveConfirm = async (game: Game) => {
     const isLocal = game.id.startsWith('local-')
+    const isMock = isMockGame(game.id)
 
     const remainingPlayers = game.players.filter(pid => pid !== userId)
     const isLastParticipant = remainingPlayers.length === 0
@@ -346,6 +401,18 @@ export function GamesList() {
       leaveLocalGame(game.id, userId)
       refreshLocalGames()
       notifyLocalGamesUpdated()
+      return
+    }
+
+    if (!isMock) {
+      const result = await leaveSupabaseGame(game.id, userId)
+
+      if (!result.ok) {
+        alert(result.error || 'Não foi possível sair deste jogo.')
+        return
+      }
+
+      await refreshSupabaseGames()
       return
     }
 
@@ -373,7 +440,7 @@ export function GamesList() {
     setSearch('')
   }
 
-  const games = [...localGames, ...mockGames]
+  const games = dedupeGames([...supabaseGames, ...localGames, ...mockGames])
 
   const filtered = games.filter(g => {
     const today = new Date().toISOString().split('T')[0]
@@ -468,6 +535,20 @@ export function GamesList() {
               </span>
             )}
           </div>
+
+          {(sharedGamesLoading || sharedGamesError) && (
+            <div
+              className={`rounded-[14px] px-3 py-2 text-[11px] font-semibold ${sharedGamesError ? 'text-amber-400' : 'text-ph-blue'}`}
+              style={{
+                background: sharedGamesError ? TONE.pending.bg : TONE.info.bg,
+                border: `1px solid ${sharedGamesError ? TONE.pending.border : TONE.info.border}`,
+              }}
+            >
+              {sharedGamesError
+                ? 'Jogos compartilhados temporariamente indisponíveis. Mostrando dados locais.'
+                : 'Carregando jogos compartilhados...'}
+            </div>
+          )}
 
           {filtered.length === 0 ? (
             <div
