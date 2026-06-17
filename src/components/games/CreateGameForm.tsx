@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/context/AuthContext'
 import { type SportKey } from '@/lib/types'
 import {
-  saveLocalGame,
   loadLocalGames,
   type LocalGameInput,
   type LocalGameAdmissionMode,
@@ -1247,7 +1246,6 @@ export function CreateGameForm() {
     if (isSaving) return
 
     const durationMinutes = getDurationMinutes(form)
-    const creatorId = user?.id ?? 'local-user'
 
     if (!form.sport || !form.level) {
       alert('Falta escolher o esporte ou o nível do jogo.')
@@ -1256,6 +1254,11 @@ export function CreateGameForm() {
 
     if (!form.arenaName || !form.time || !form.endTime) {
       alert('Falta escolher arena, data ou horário disponível.')
+      return
+    }
+
+    if (!user?.id) {
+      alert('Você precisa estar logado para criar um jogo compartilhado.')
       return
     }
 
@@ -1284,24 +1287,18 @@ export function CreateGameForm() {
     setIsSaving(true)
 
     try {
-      if (user?.id) {
-        const remoteResult = await createSupabaseGame(gameInput, user.id)
+      const remoteResult = await createSupabaseGame(gameInput, user.id)
 
-        if (remoteResult.ok) {
-          setSaveScope('shared')
-          setSuccess(true)
-          return
-        }
+      if (!remoteResult.ok) {
+        console.error('[PlayHub] Erro ao criar jogo no Supabase:', remoteResult.error)
 
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[PlayHub] Supabase falhou. Tentando fallback local:', remoteResult.error)
-        }
-      }
+        alert(
+          'O jogo NÃO foi salvo no Supabase.\n\n' +
+          'Erro técnico:\n' +
+          remoteResult.error + '\n\n' +
+          'Tire print desta mensagem e me envie.'
+        )
 
-      const saved = saveLocalGame(gameInput, creatorId)
-
-      if (!saved) {
-        alert('Não foi possível salvar a reserva/jogo. Tente novamente.')
         return
       }
 
@@ -1309,8 +1306,19 @@ export function CreateGameForm() {
         window.dispatchEvent(new Event('playhub:local-games-updated'))
       }
 
-      setSaveScope('local')
+      setSaveScope('shared')
       setSuccess(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro desconhecido'
+
+      console.error('[PlayHub] Erro inesperado ao criar jogo compartilhado:', error)
+
+      alert(
+        'Erro inesperado ao criar jogo compartilhado.\n\n' +
+        'Erro técnico:\n' +
+        message + '\n\n' +
+        'Tire print desta mensagem e me envie.'
+      )
     } finally {
       setIsSaving(false)
     }
