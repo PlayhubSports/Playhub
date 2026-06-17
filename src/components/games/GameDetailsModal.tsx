@@ -1,6 +1,6 @@
 'use client'
 
-// PlayHub GameDetailsModal — Supabase action-safe v1
+// PlayHub GameDetailsModal — players list + athlete preview
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { type Game } from '@/lib/types'
@@ -14,6 +14,7 @@ import {
   loadLocalGames,
   rejectLocalGameJoinRequest,
 } from '@/lib/localGames'
+import { createClient } from '@/lib/supabase/client'
 
 type GameActionResult = void | Promise<void>
 
@@ -23,6 +24,41 @@ interface Props {
   onClose:       () => void
   onJoin:        (game: Game) => GameActionResult
   onLeave:       (game: Game) => GameActionResult
+}
+
+type PlayerGameStatus = 'confirmed' | 'pending' | 'rejected'
+type PlayerGameRole = 'organizer' | 'player'
+
+interface PublicAthleteProfile {
+  id: string
+  display_name: string | null
+  avatar_url: string | null
+  city: string | null
+  sport_level: string | null
+  bio: string | null
+  is_visitor: boolean | null
+  games_count: number | null
+  rating_average: number | null
+  public_age: number | null
+  public_email: string | null
+  public_phone: string | null
+  public_instagram: string | null
+  show_age: boolean | null
+  show_email: boolean | null
+  show_phone: boolean | null
+  show_instagram: boolean | null
+  show_stats: boolean | null
+}
+
+interface PlayerSlot {
+  kind: 'player' | 'empty'
+  userId?: string
+  role?: PlayerGameRole
+  status?: PlayerGameStatus
+  profile?: PublicAthleteProfile | null
+  isCurrentUser?: boolean
+  isOrganizer?: boolean
+  isVisitor?: boolean
 }
 
 type StatusTone = 'pending' | 'success' | 'danger' | 'info' | 'neutral'
@@ -481,6 +517,89 @@ function getPlayerLabel(playerId: string, index: number) {
   return `Jogador ${index + 1}${suffix ? ` · ${suffix}` : ''}`
 }
 
+function getErrorMessage(error: unknown) {
+  if (!error) return 'Erro desconhecido.'
+
+  if (typeof error === 'string') return error
+  if (error instanceof Error) return error.message
+
+  if (typeof error === 'object' && error !== null) {
+    const possible = error as {
+      message?: string
+      details?: string
+      hint?: string
+      code?: string
+    }
+
+    return [
+      possible.message,
+      possible.details,
+      possible.hint,
+      possible.code ? `Código: ${possible.code}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
+      .trim() || JSON.stringify(error)
+  }
+
+  return String(error)
+}
+
+function getPlayerStatusTone(status?: PlayerGameStatus): StatusTone {
+  if (status === 'pending') return 'pending'
+  if (status === 'rejected') return 'danger'
+  return 'success'
+}
+
+function getPlayerStatusIcon(status?: PlayerGameStatus): IconName {
+  if (status === 'pending') return 'hourglass'
+  if (status === 'rejected') return 'x'
+  return 'check'
+}
+
+function getPlayerStatusLabel(status?: PlayerGameStatus) {
+  if (status === 'pending') return 'Aguardando aprovação'
+  if (status === 'rejected') return 'Recusado'
+  return 'Confirmado'
+}
+
+function getPlayerRoleLabel(slot: PlayerSlot) {
+  if (slot.role === 'organizer' || slot.isOrganizer) return 'Organizador'
+  return 'Jogador'
+}
+
+function getPlayerDisplayName(slot: PlayerSlot, index: number) {
+  if (slot.kind === 'empty') return 'Vaga livre'
+
+  const baseName =
+    slot.profile?.display_name?.trim() ||
+    (slot.userId ? getPlayerLabel(slot.userId, index) : `Jogador ${index + 1}`)
+
+  return slot.isVisitor ? `${baseName} (visitante)` : baseName
+}
+
+function getPlayerLevel(slot: PlayerSlot) {
+  return slot.profile?.sport_level?.trim() || 'Perfil incompleto'
+}
+
+function getPlayerSubtitle(slot: PlayerSlot) {
+  if (slot.kind === 'empty') return 'Disponível'
+
+  return [
+    getPlayerRoleLabel(slot),
+    getPlayerStatusLabel(slot.status),
+    getPlayerLevel(slot),
+  ].join(' · ')
+}
+
+function isVisitorPlayer(userId: string | undefined, profile: PublicAthleteProfile | null | undefined) {
+  if (profile?.is_visitor) return true
+  if (!userId) return true
+  if (userId === 'local-user') return true
+
+  return false
+}
+
 function StatusCard({
   tone,
   icon,
@@ -635,9 +754,279 @@ function ActionTile({
   )
 }
 
+function AthleteInitials({ name, visitor }: { name: string; visitor?: boolean }) {
+  const initials = name
+    .replace('(visitante)', '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(part => part.charAt(0).toUpperCase())
+    .join('') || '?'
+
+  return (
+    <div
+      className="h-10 w-10 flex-shrink-0 rounded-[14px] flex items-center justify-center text-[12px] font-extrabold"
+      style={{
+        background: visitor
+          ? 'rgba(245,158,11,0.10)'
+          : 'linear-gradient(135deg, rgba(29,161,242,0.22), rgba(126,211,33,0.16))',
+        border: visitor
+          ? '1px solid rgba(245,158,11,0.24)'
+          : '1px solid rgba(29,161,242,0.22)',
+      }}
+    >
+      {initials}
+    </div>
+  )
+}
+
+function PlayerSlotRow({
+  slot,
+  index,
+  onPreview,
+}: {
+  slot: PlayerSlot
+  index: number
+  onPreview: (slot: PlayerSlot) => void
+}) {
+  const isEmpty = slot.kind === 'empty'
+  const name = getPlayerDisplayName(slot, index)
+  const tone = isEmpty ? 'neutral' : getPlayerStatusTone(slot.status)
+  const statusIcon = isEmpty ? 'users' : getPlayerStatusIcon(slot.status)
+
+  if (isEmpty) {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-[14px] p-3 text-ph-muted"
+        style={{
+          background: 'rgba(255,255,255,0.035)',
+          border: '1px dashed rgba(255,255,255,0.10)',
+        }}
+      >
+        <AthleteInitials name="Vaga livre" visitor />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-extrabold">
+            Vaga livre
+          </p>
+          <p className="text-[11px] text-ph-muted">
+            Aguardando atleta
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onPreview(slot)}
+      onMouseEnter={() => onPreview(slot)}
+      className="w-full flex items-center gap-3 rounded-[14px] p-3 text-left transition-all hover:scale-[1.01]"
+      style={{
+        background: 'linear-gradient(180deg, rgba(15,28,42,0.98), rgba(8,17,29,0.99))',
+        border: '1px solid rgba(255,255,255,0.08)',
+      }}
+    >
+      <AthleteInitials name={name} visitor={slot.isVisitor} />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="truncate text-[13px] font-extrabold">
+            {name}
+          </p>
+
+          {slot.isCurrentUser && (
+            <span className="text-[10px] font-extrabold text-ph-blue">
+              Você
+            </span>
+          )}
+        </div>
+
+        <p className="mt-0.5 truncate text-[11px] text-ph-muted">
+          {getPlayerSubtitle(slot)}
+        </p>
+      </div>
+
+      <StatusBadge
+        tone={tone}
+        icon={statusIcon}
+        label={getPlayerStatusLabel(slot.status)}
+      />
+    </button>
+  )
+}
+
+function AthletePreviewCard({
+  slot,
+  onClose,
+}: {
+  slot: PlayerSlot
+  onClose: () => void
+}) {
+  const name = getPlayerDisplayName(slot, 0)
+  const profile = slot.profile
+  const statsVisible = profile?.show_stats !== false
+
+  return (
+    <div
+      className="rounded-[18px] p-4 space-y-3"
+      style={{
+        background: 'linear-gradient(180deg, rgba(15,28,42,0.99), rgba(8,17,29,0.99))',
+        border: '1px solid rgba(29,161,242,0.22)',
+        boxShadow: '0 18px 46px rgba(0,0,0,0.36)',
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <AthleteInitials name={name} visitor={slot.isVisitor} />
+
+          <div className="min-w-0">
+            <p className="truncate text-[15px] font-extrabold">
+              {name}
+            </p>
+
+            <p className="text-[11px] text-ph-muted mt-0.5">
+              {getPlayerRoleLabel(slot)} · {getPlayerStatusLabel(slot.status)}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-8 w-8 flex-shrink-0 rounded-[10px] text-ph-muted hover:text-ph-text"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.07)',
+          }}
+          aria-label="Fechar card do atleta"
+        >
+          <Icon name="close" size={15} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-[12px]">
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-ph-muted">Nível</p>
+          <p className="font-semibold">{profile?.sport_level || 'Não informado'}</p>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-ph-muted">Cidade</p>
+          <p className="font-semibold">{profile?.city || 'Não informada'}</p>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-ph-muted">Jogos</p>
+          <p className="font-semibold">{statsVisible ? profile?.games_count ?? 0 : 'Oculto'}</p>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-ph-muted">Avaliação</p>
+          <p className="font-semibold">
+            {statsVisible ? Number(profile?.rating_average || 0).toFixed(1) : 'Oculta'}
+          </p>
+        </div>
+      </div>
+
+      {profile?.bio && (
+        <p className="text-[12px] leading-relaxed text-ph-muted">
+          {profile.bio}
+        </p>
+      )}
+
+      <div className="space-y-1 text-[12px]">
+        <p>
+          <span className="text-ph-muted">Idade: </span>
+          <span>{profile?.public_age ? `${profile.public_age} anos` : 'Oculta pelo atleta'}</span>
+        </p>
+
+        <p>
+          <span className="text-ph-muted">Instagram: </span>
+          <span>{profile?.public_instagram || 'Oculto pelo atleta'}</span>
+        </p>
+
+        <p>
+          <span className="text-ph-muted">Contato: </span>
+          <span>{profile?.public_phone || 'Oculto pelo atleta'}</span>
+        </p>
+
+        <p>
+          <span className="text-ph-muted">Email: </span>
+          <span>{profile?.public_email || 'Oculto pelo atleta'}</span>
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function PlayersPanel({
+  slots,
+  loading,
+  error,
+  selectedAthlete,
+  onPreview,
+  onClosePreview,
+}: {
+  slots: PlayerSlot[]
+  loading: boolean
+  error: string
+  selectedAthlete: PlayerSlot | null
+  onPreview: (slot: PlayerSlot) => void
+  onClosePreview: () => void
+}) {
+  const filledSlots = slots.filter(slot => slot.kind === 'player').length
+  const totalSlots = slots.length
+
+  return (
+    <SectionCard title={`Jogadores da partida · ${filledSlots}/${totalSlots}`} icon="users">
+      {loading && (
+        <StatusCard
+          tone="info"
+          icon="hourglass"
+          label="Carregando jogadores"
+          description="Buscando participantes e perfis públicos da partida."
+        />
+      )}
+
+      {error && (
+        <StatusCard
+          tone="pending"
+          icon="warning"
+          label="Lista parcialmente carregada"
+          description={error}
+        />
+      )}
+
+      <div className="space-y-2">
+        {slots.map((slot, index) => (
+          <PlayerSlotRow
+            key={slot.kind === 'empty' ? `empty-${index}` : `${slot.userId}-${index}`}
+            slot={slot}
+            index={index}
+            onPreview={onPreview}
+          />
+        ))}
+      </div>
+
+      {selectedAthlete && selectedAthlete.kind === 'player' && (
+        <AthletePreviewCard
+          slot={selectedAthlete}
+          onClose={onClosePreview}
+        />
+      )}
+    </SectionCard>
+  )
+}
+
 export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave }: Props) {
   const [localGame, setLocalGame] = useState<Game>(game)
   const [actionLoading, setActionLoading] = useState(false)
+  const [playersPanelOpen, setPlayersPanelOpen] = useState(false)
+  const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>([])
+  const [playersLoading, setPlayersLoading] = useState(false)
+  const [playersError, setPlayersError] = useState('')
+  const [selectedAthlete, setSelectedAthlete] = useState<PlayerSlot | null>(null)
 
   useEffect(() => {
     setLocalGame(game)
@@ -674,6 +1063,153 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
     : hasPendingRequest
       ? 'pending'
       : 'neutral'
+
+  const buildFallbackPlayerSlots = () => {
+    const uniquePlayerIds = Array.from(
+      new Set(
+        [
+          currentGame.created_by,
+          ...(Array.isArray(currentGame.players) ? currentGame.players : []),
+        ].filter(Boolean)
+      )
+    ) as string[]
+
+    const slots: PlayerSlot[] = uniquePlayerIds.slice(0, currentGame.max_players).map(userId => {
+      const organizer = userId === currentGame.created_by
+
+      return {
+        kind: 'player',
+        userId,
+        role: organizer ? 'organizer' : 'player',
+        status: 'confirmed',
+        profile: null,
+        isCurrentUser: userId === currentUserId,
+        isOrganizer: organizer,
+        isVisitor: isVisitorPlayer(userId, null),
+      }
+    })
+
+    while (slots.length < currentGame.max_players) {
+      slots.push({ kind: 'empty' })
+    }
+
+    return slots
+  }
+
+  useEffect(() => {
+    let active = true
+
+    async function loadPlayers() {
+      setPlayersLoading(true)
+      setPlayersError('')
+
+      const fallbackSlots = buildFallbackPlayerSlots()
+
+      try {
+        if (currentGame.id.startsWith('local-')) {
+          if (active) {
+            setPlayerSlots(fallbackSlots)
+            setPlayersLoading(false)
+          }
+
+          return
+        }
+
+        const supabase = createClient() as any
+
+        const { data: playerRows, error: playerError } = await supabase
+          .from('game_players')
+          .select('user_id,status,role,created_at')
+          .eq('game_id', currentGame.id)
+          .order('created_at', { ascending: true })
+
+        if (playerError) {
+          throw playerError
+        }
+
+        const normalizedRows = (playerRows ?? []) as Array<{
+          user_id: string
+          status: PlayerGameStatus | null
+          role: PlayerGameRole | null
+          created_at: string | null
+        }>
+
+        if (normalizedRows.length === 0) {
+          if (active) {
+            setPlayerSlots(fallbackSlots)
+            setPlayersError('Participantes ainda não encontrados no banco. Exibindo dados do jogo.')
+          }
+
+          return
+        }
+
+        const playerIds = normalizedRows.map(row => row.user_id).filter(Boolean)
+        const profileMap = new Map<string, PublicAthleteProfile>()
+
+        if (playerIds.length > 0) {
+          const { data: profiles, error: profileError } = await supabase
+            .from('playhub_player_cards')
+            .select('*')
+            .in('id', playerIds)
+
+          if (profileError) {
+            setPlayersError('Perfis públicos indisponíveis. Exibindo participantes com dados básicos.')
+          } else {
+            ;((profiles ?? []) as PublicAthleteProfile[]).forEach(profile => {
+              profileMap.set(profile.id, profile)
+            })
+          }
+        }
+
+        const slots: PlayerSlot[] = normalizedRows
+          .slice(0, currentGame.max_players)
+          .map(row => {
+            const profile = profileMap.get(row.user_id) ?? null
+            const organizer = row.role === 'organizer' || row.user_id === currentGame.created_by
+
+            return {
+              kind: 'player',
+              userId: row.user_id,
+              role: organizer ? 'organizer' : 'player',
+              status: row.status ?? 'confirmed',
+              profile,
+              isCurrentUser: row.user_id === currentUserId,
+              isOrganizer: organizer,
+              isVisitor: isVisitorPlayer(row.user_id, profile),
+            }
+          })
+
+        while (slots.length < currentGame.max_players) {
+          slots.push({ kind: 'empty' })
+        }
+
+        if (active) {
+          setPlayerSlots(slots)
+        }
+      } catch (error) {
+        if (active) {
+          setPlayersError(getErrorMessage(error))
+          setPlayerSlots(fallbackSlots)
+        }
+      } finally {
+        if (active) {
+          setPlayersLoading(false)
+        }
+      }
+    }
+
+    void loadPlayers()
+
+    return () => {
+      active = false
+    }
+  }, [
+    currentGame.id,
+    currentGame.created_by,
+    currentGame.max_players,
+    currentGame.players,
+    currentUserId,
+  ])
 
   const [isSaved, setIsSaved] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -923,7 +1459,28 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
               <Detail icon="finish" label="Término" value={endTime} />
               <Detail icon="timer" label="Duração" value={formatDuration(currentGame.duration_minutes || 60)} />
               <Detail icon="level" label="Nível" value={LEVEL_LABEL[currentGame.level] ?? currentGame.level} />
-              <Detail icon="users" label="Vagas" value={`${currentGame.players.length} / ${currentGame.max_players}`} />
+              <div className="flex items-start gap-2 min-w-0">
+                <span className="mt-0.5 flex-shrink-0 text-ph-blue">
+                  <Icon name="users" size={15} />
+                </span>
+
+                <div className="min-w-0">
+                  <p className="text-[10px] text-ph-muted uppercase tracking-wide">
+                    Vagas
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlayersPanelOpen(open => !open)
+                      setSelectedAthlete(null)
+                    }}
+                    className="text-left text-[13px] font-extrabold text-ph-text hover:text-ph-blue transition-colors underline decoration-dotted underline-offset-4"
+                  >
+                    {currentGame.players.length} / {currentGame.max_players}
+                  </button>
+                </div>
+              </div>
               <Detail icon="participation" label="Participação" value={userParticipationLabel} tone={userParticipationTone} />
             </div>
 
@@ -936,6 +1493,17 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
               </p>
             )}
           </SectionCard>
+
+          {playersPanelOpen && (
+            <PlayersPanel
+              slots={playerSlots.length > 0 ? playerSlots : buildFallbackPlayerSlots()}
+              loading={playersLoading}
+              error={playersError}
+              selectedAthlete={selectedAthlete}
+              onPreview={slot => setSelectedAthlete(slot)}
+              onClosePreview={() => setSelectedAthlete(null)}
+            />
+          )}
 
           <SectionCard title="Valores estimados" icon="price">
             <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-[13px]">
