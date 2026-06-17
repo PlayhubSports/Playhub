@@ -1,6 +1,6 @@
 'use client'
 
-// PlayHub GameDetailsModal — players list + athlete preview
+// PlayHub GameDetailsModal — players list link + athlete preview
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { type Game } from '@/lib/types'
@@ -1459,30 +1459,31 @@ export function GameDetailsModal({ game, currentUserId, onClose, onJoin, onLeave
               <Detail icon="finish" label="Término" value={endTime} />
               <Detail icon="timer" label="Duração" value={formatDuration(currentGame.duration_minutes || 60)} />
               <Detail icon="level" label="Nível" value={LEVEL_LABEL[currentGame.level] ?? currentGame.level} />
-              <div className="flex items-start gap-2 min-w-0">
-                <span className="mt-0.5 flex-shrink-0 text-ph-blue">
-                  <Icon name="users" size={15} />
-                </span>
-
-                <div className="min-w-0">
-                  <p className="text-[10px] text-ph-muted uppercase tracking-wide">
-                    Vagas
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPlayersPanelOpen(open => !open)
-                      setSelectedAthlete(null)
-                    }}
-                    className="text-left text-[13px] font-extrabold text-ph-text hover:text-ph-blue transition-colors underline decoration-dotted underline-offset-4"
-                  >
-                    {currentGame.players.length} / {currentGame.max_players}
-                  </button>
-                </div>
-              </div>
+              <Detail icon="users" label="Vagas" value={`${currentGame.players.length} / ${currentGame.max_players}`} />
               <Detail icon="participation" label="Participação" value={userParticipationLabel} tone={userParticipationTone} />
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPlayersPanelOpen(open => !open)
+                setSelectedAthlete(null)
+              }}
+              className="w-full rounded-[14px] px-4 py-3 text-[13px] font-extrabold text-ph-blue text-left inline-flex items-center justify-between gap-3"
+              style={{
+                background: playersPanelOpen ? TONE.info.bg : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${playersPanelOpen ? TONE.info.border : 'rgba(255,255,255,0.07)'}`,
+              }}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Icon name="users" size={16} />
+                {playersPanelOpen ? 'Ocultar lista de jogadores' : 'Confira a lista de jogadores'}
+              </span>
+
+              <span className="text-[12px] text-ph-muted">
+                {currentGame.players.length}/{currentGame.max_players}
+              </span>
+            </button>
 
             {currentGame.arena?.address && (
               <p className="flex items-center gap-1.5 text-[12px] text-ph-muted pt-1">
