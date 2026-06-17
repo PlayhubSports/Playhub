@@ -15,7 +15,6 @@ import { createSupabaseGame } from '@/lib/supabaseGames'
 type Level = 'iniciante' | 'intermediario' | 'avancado' | 'todos'
 type Privacy = 'publico' | 'privado'
 type StatusTone = 'pending' | 'success' | 'danger' | 'info' | 'neutral'
-type SaveScope = 'shared' | 'local'
 
 type IconName =
   | 'sport'
@@ -1093,8 +1092,6 @@ export function CreateGameForm() {
   const [step, setStep] = useState(0)
   const [form, setForm] = useState<FormData>(() => createInitialForm())
   const [success, setSuccess] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveScope, setSaveScope] = useState<SaveScope>('shared')
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({})
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const topRef = useRef<HTMLDivElement | null>(null)
@@ -1243,8 +1240,6 @@ export function CreateGameForm() {
   }
 
   const handleCreate = async () => {
-    if (isSaving) return
-
     const durationMinutes = getDurationMinutes(form)
 
     if (!form.sport || !form.level) {
@@ -1284,51 +1279,30 @@ export function CreateGameForm() {
       admissionMode: form.admissionMode,
     } satisfies LocalGameInput
 
-    setIsSaving(true)
+    const result = await createSupabaseGame(gameInput, user.id)
 
-    try {
-      const remoteResult = await createSupabaseGame(gameInput, user.id)
-
-      if (!remoteResult.ok) {
-        console.error('[PlayHub] Erro ao criar jogo no Supabase:', remoteResult.error)
-
-        alert(
-          'O jogo NÃO foi salvo no Supabase.\n\n' +
-          'Erro técnico:\n' +
-          remoteResult.error + '\n\n' +
-          'Tire print desta mensagem e me envie.'
-        )
-
-        return
-      }
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('playhub:local-games-updated'))
-      }
-
-      setSaveScope('shared')
-      setSuccess(true)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido'
-
-      console.error('[PlayHub] Erro inesperado ao criar jogo compartilhado:', error)
-
+    if (!result.ok) {
       alert(
-        'Erro inesperado ao criar jogo compartilhado.\n\n' +
+        'Não foi possível salvar o jogo no Supabase.\n\n' +
         'Erro técnico:\n' +
-        message + '\n\n' +
-        'Tire print desta mensagem e me envie.'
+        result.error
       )
-    } finally {
-      setIsSaving(false)
+      return
     }
+
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('playhub:local_games')
+      localStorage.removeItem('playhub:game_history')
+      window.dispatchEvent(new Event('playhub:local-games-updated'))
+    }
+
+    setSuccess(true)
   }
 
   if (success) {
     return (
       <SuccessScreen
         form={form}
-        saveScope={saveScope}
         onBack={() => {
           setSuccess(false)
           router.push('/jogos')
@@ -1433,16 +1407,15 @@ export function CreateGameForm() {
           <button
             type="button"
             onClick={handleCreate}
-            disabled={isSaving}
-            className="w-full rounded-[15px] py-3.5 text-[14px] font-extrabold text-white inline-flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+            className="w-full rounded-[15px] py-3.5 text-[14px] font-extrabold text-white inline-flex items-center justify-center gap-2"
             style={{
               background:'linear-gradient(135deg,#7ED321,#00C9A7,#39ff14)',
               boxShadow:'0 10px 28px rgba(126,211,33,0.28)',
               border:'1px solid rgba(255,255,255,0.16)',
             }}
           >
-            <Icon name={isSaving ? 'hourglass' : 'check'} size={16} />
-            {isSaving ? 'Salvando reserva...' : 'Solicitar reserva'}
+            <Icon name="check" size={16} />
+            Solicitar reserva
           </button>
         )}
       </div>
@@ -2030,7 +2003,7 @@ function StepConfirm({ form }: { form: FormData }) {
 }
 
 // ══ TELA DE SUCESSO ══════════════════════════
-function SuccessScreen({ form, saveScope, onBack }: { form: FormData; saveScope: SaveScope; onBack: () => void }) {
+function SuccessScreen({ form, onBack }: { form: FormData; onBack: () => void }) {
   const sport = SPORTS_LIST.find(s => s.key === form.sport)
   const duration = getDurationMinutes(form)
   const total = reservationTotal(form)
@@ -2050,7 +2023,7 @@ function SuccessScreen({ form, saveScope, onBack }: { form: FormData; saveScope:
         </div>
 
       <p className="text-[11px] font-extrabold text-ph-green uppercase tracking-widest mb-2">
-        {saveScope === 'shared' ? 'Pedido enviado' : 'Salvo localmente'}
+        Pedido enviado
       </p>
 
       <h2
@@ -2062,7 +2035,7 @@ function SuccessScreen({ form, saveScope, onBack }: { form: FormData; saveScope:
           backgroundClip:'text',
         }}
       >
-        {saveScope === 'shared' ? 'Reserva solicitada' : 'Reserva salva no aparelho'}
+        Reserva solicitada
       </h2>
 
       <p className="text-[15px] font-semibold mb-1">{form.title}</p>
@@ -2072,16 +2045,7 @@ function SuccessScreen({ form, saveScope, onBack }: { form: FormData; saveScope:
       </p>
 
       <div className="w-full max-w-xs mb-4">
-        {saveScope === 'shared' ? (
-          <ReservationStatusCard />
-        ) : (
-          <StatusCard
-            tone="pending"
-            icon="hourglass"
-            title="Reserva salva localmente"
-            description="O app não conseguiu salvar online neste momento. O jogo ficou salvo neste aparelho como fallback seguro."
-          />
-        )}
+        <ReservationStatusCard />
       </div>
 
       <div className="w-full max-w-xs mb-4">
